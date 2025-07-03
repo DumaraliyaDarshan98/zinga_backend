@@ -25,6 +25,14 @@ const trackGroundActivity = async (userId, groundId, activityType, details = {})
 export const createGround = async (req, res) => {
     try {
         req.body.createdBy = req.user._id;
+        
+        // Store lat & log
+        const [latStr, lonStr] =  req.body.coordinates.split(',');
+        const lat = parseFloat(latStr);
+        const lon = parseFloat(lonStr);
+
+        req.body.location = { type: 'Point', coordinates : [lon, lat]};
+
         const ground = new Ground(req.body);
         await ground.save();
 
@@ -573,6 +581,12 @@ export const updateGround = async (req, res) => {
             });
         }
 
+        // Store lat & log
+        const [latStr, lonStr] = req.coordinates.split(',');
+        const lat = parseFloat(latStr);
+        const lon = parseFloat(lonStr);
+
+        req.body.location = { type: 'Point', coordinates : [lon, lat]};
         ground = await Ground.findByIdAndUpdate(req.params.id, req.body, {
             new: true,
             runValidators: true,

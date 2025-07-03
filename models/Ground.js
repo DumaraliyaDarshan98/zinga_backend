@@ -124,6 +124,10 @@ const groundSchema = new mongoose.Schema({
         type: String,
         trim: true,
     },
+    location: {
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], required: true } 
+    },
     googleLink: {
         type: String,
         trim: true,
@@ -159,6 +163,8 @@ const groundSchema = new mongoose.Schema({
     timestamps: true,
     versionKey: false
 });
+
+groundSchema.index({ location: '2dsphere' });
 
 const Ground = mongoose.model('Ground', groundSchema);
 

@@ -13,6 +13,7 @@ import Booking from '../models/GroundBooking.js';
 import Match from '../models/Match.js';
 import User from '../models/User.js';
 import TournamentTeam from '../models/TournamentTeam.js';
+import Setting from '../models/Setting.js';
 
 /**
  * Generate a tournament ID based on format: Gamecode-City-TournamentType-Number (e.g., CKBLRWA0001)
@@ -1787,7 +1788,7 @@ const progressTeamsToNextStage = async (tournament, matchIndex, winnerTeamId) =>
  */
 export const getAllTournaments = async (req, res) => {
     try {
-        const { status, name, startDate, venue } = req.query;
+        const { status, name, startDate, venue, coordinates } = req.query;
 
         // Build filter object
         const filter = {
@@ -1807,6 +1808,34 @@ export const getAllTournaments = async (req, res) => {
             filter.venues = venue;
         }
 
+        if(coordinates){
+
+            const setting = await Setting.findOne({ key: 'GroundSearchRadius' });
+            const radius = setting ? setting.value : 1000; // fallback to 1000 meters if not found
+            
+            const [latStr, lonStr] = coordinates.split(',');
+            const lat = parseFloat(latStr);
+            const lon = parseFloat(lonStr);
+
+            const grounds = await Ground.find({
+                location: {
+                    $near: {
+                    $geometry: {
+                        type: 'Point',
+                        coordinates: [lon, lat]
+                    },
+                    $maxDistance: radius // meters
+                    }
+                },
+            },{ 
+                _id: 1
+            });
+                    
+            //Extract array of ground IDs
+            const groundIds = grounds.map(g => g._id);
+            filter.venues = { $in: groundIds };
+        }
+        
         // Get tournaments with basic information
         const tournaments = await Tournament.find(filter)
             .populate('venues', 'name city address1')
