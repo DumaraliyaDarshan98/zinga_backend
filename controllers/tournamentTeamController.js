@@ -2,6 +2,7 @@
 import Team from '../models/Teams.js';
 import Tournament from '../models/Tournament.js';
 import mongoose from 'mongoose';
+import TournamentTeam from '../models/TournamentTeam.js';
 
 /**
  * Update team's tournament statistics after a match
@@ -224,3 +225,112 @@ export const updateTournamentPlayerStatus = async (req, res) => {
         });
     }
 }; 
+
+/**
+ * Add or Remove tournament player
+ */
+export const playerAction = async (req, res) => {
+    try {
+        const { tournamentTeamId, userId } = req.params;
+        const { action, isPlaying = true } = req.query;
+
+        const tournamentTeam = await TournamentTeam.findById(tournamentTeamId);
+        if (!tournamentTeam) return res.status(404).json({
+            status: false,
+            message: 'Team not found',
+            data: null
+        });
+        
+        if (action === 'add') {
+            // Check if player already exists in the team
+            const existingPlayerIndex = tournamentTeam.players.findIndex(p => p.player && p.player.toString() === userId);
+            
+            if (existingPlayerIndex === -1) {
+                // Add new player with playing status
+                tournamentTeam.players.push({ player: userId, isPlaying });
+            } else {
+                // Update existing player's playing status
+                tournamentTeam.players[existingPlayerIndex].isPlaying = isPlaying;
+            }
+        } else if (action === 'remove') {
+            // Remove player completely
+            tournamentTeam.players = tournamentTeam.players.filter(p => p.player && p.player.toString() !== userId);
+        } else if (action === 'updateStatus') {
+            // Just update playing status of an existing player
+            const existingPlayerIndex = tournamentTeam.players.findIndex(p => p.player && p.player.toString() === userId);
+            
+            if (existingPlayerIndex !== -1) {
+                tournamentTeam.players[existingPlayerIndex].isPlaying = isPlaying;
+            } else {
+                return res.status(404).json({
+                    status: false,
+                    message: 'Player not found in team',
+                    data: null
+                });
+            }
+        } else {
+            return res.status(400).json({ 
+                status: false,
+                message: 'Invalid action. Must be add, remove, or updateStatus',
+                data: null
+            });
+        }
+
+        await tournamentTeam.save();
+        
+        // Populate players before returning
+        const populatedTeam = await TournamentTeam.findById(tournamentTeamId)
+            .populate('players.player', 'name email avatar mobile')
+            .populate('createdBy', 'name email');
+            
+        return res.json({
+            status: true,
+            message: 'Player action successful',
+            data: populatedTeam
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+};
+
+
+/**
+ * Get Tournament Team detail
+ */
+export const getTournamentTeamDetail = async (req, res) => {
+    try {
+        const { teamId, bookingId } = req.params;
+
+        let query = {
+            team: teamId,
+            booking :bookingId 
+        };
+        
+        // Get tournament team with detailed information
+        const tournamentTeam = await TournamentTeam.findOne(query)
+            .populate('players.player', 'name email avatar mobile')
+            .populate('createdBy', 'name email');
+
+        if (!tournamentTeam) return res.status(404).json({
+            status: false,
+            message: 'Team not found',
+            data: null
+        });
+
+        return res.json({
+            status: true,
+            message: 'Tournament team detail',
+            data: tournamentTeam
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+};

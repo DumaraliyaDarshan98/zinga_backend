@@ -35,6 +35,10 @@ const tournamentTeamSchema = new mongoose.Schema(
                 default: 0
             }
         }],
+        booking: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Booking'
+        },
         status: {
             type: String,
             enum: ['registered', 'active', 'eliminated', 'completed'],

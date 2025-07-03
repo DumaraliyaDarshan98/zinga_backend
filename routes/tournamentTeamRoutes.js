@@ -3,6 +3,8 @@ import {
     getTeamTournamentStats,
     updateTeamTournamentStatus,
     updateTournamentPlayerStatus,
+    playerAction,
+    getTournamentTeamDetail
 } from '../controllers/tournamentTeamController.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 
@@ -22,5 +24,11 @@ router.patch('/:teamId/tournament/:tournamentId/player/:playerId/status', authMi
 
 // Get player's tournaments
 // router.get('/player/tournaments', authMiddleware, getPlayerTournaments);
+
+// Add or Remove player from tournament
+router.patch('/:tournamentTeamId/:userId', authMiddleware, playerAction);
+
+// Get Tournament Team Detail
+router.get('/:teamId/:bookingId', authMiddleware, getTournamentTeamDetail);
 
 export default router; 

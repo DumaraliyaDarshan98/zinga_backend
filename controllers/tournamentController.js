@@ -1326,6 +1326,7 @@ export const joinTournament = async (req, res) => {
         }
 
         const conflicts = [];
+        let bookingId = '';
 
         // Iterate through each day in the range
         for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
@@ -1385,6 +1386,7 @@ export const joinTournament = async (req, res) => {
                 }).session(session);
 
                 if (existingBookings.length >= 2) {
+                    bookingId = existingBookings._id;
                     conflicts.push({
                         date: currentBookingDate.toISOString().split("T")[0],
                         courtId,
@@ -1405,9 +1407,13 @@ export const joinTournament = async (req, res) => {
                     });
 
                     await newBooking.save({ session });
+                    bookingId = newBooking._id;
                 }
             }
         }
+        
+        tournamentTeam.booking = bookingId;
+        await tournamentTeam.save({ session });
 
         if (conflicts.length > 0) {
             await session.abortTransaction();

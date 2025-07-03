@@ -39,6 +39,10 @@ const tournamentSchema = new mongoose.Schema(
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'Team',
             },
+            tournamentTeam: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'TournamentTeam',
+            },
             joinedAt: {
                 type: Date,
                 default: Date.now,
