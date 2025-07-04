@@ -1852,11 +1852,27 @@ export const getAllTournaments = async (req, res) => {
             const userTeams = await Team.find({ "players.player": { $in: [req.user._id] } });
             userTeamIds = userTeams.map(team => team._id.toString());
         }
+        
+        // Get all tournament IDs
+        const tournamentIds = tournaments.map(t => t._id);
 
-
+        // Fetch bookings for all tournaments
+        const bookings = await Booking.find({
+            tournamentId: { $in: tournamentIds }
+        }).select('groundId courtId slotId userId bookingDate tournamentId');
+        
+        // Attach bookings manually to each tournament
+        const tournamentsWithBookings = tournaments.map(t => {
+            const relatedBookings = bookings.filter(b => b.tournamentId.toString() === t._id.toString());
+            return {
+                ...t.toObject(),
+                bookings: relatedBookings || []
+            };
+        });
+        
         // Transform data to include team-specific status
-        let transformedTournaments = tournaments.map(tournament => {
-            const tournamentObj = tournament.toObject();
+        let transformedTournaments = tournamentsWithBookings.map(tournament => {
+            const tournamentObj = tournament;
 
             // Check if user's team is part of this tournament
             const userTeamInTournament = tournamentObj.registeredTeams.some(

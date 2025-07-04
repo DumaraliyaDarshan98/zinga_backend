@@ -37,7 +37,13 @@ const bookingSchema = new mongoose.Schema({
         type: String,
         enum: ['regular', 'date', 'day', 'week'],
         default: 'regular',
-    }
+    },
+    tournamentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Tournament',
+        required: false,
+        default: null
+    },
 }, { versionKey: false, timestamps: true });
 
 export default mongoose.model('Booking', bookingSchema);
