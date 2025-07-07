@@ -3,6 +3,8 @@ import Tournament from '../models/Tournament.js';
 import PlayerStats from '../models/PlayerStats.js';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
+import Point from '../models/Point.js';
+import Team from '../models/Teams.js';
 
 /**
  * Get match details by ID
@@ -2720,6 +2722,1044 @@ export const updateBall = async (req, res) => {
         // Update history logs
         if (historyLogs.length > 0) {
             match[innings].historyLogs = [...match[innings].historyLogs, ...historyLogs];
+        }   
+
+        await match.save();
+
+        return res.status(200).json({
+            status: true,
+            message: 'Ball Updated Successfully',
+            data: match
+        });
+    } catch (error) {
+        console.error('Error while the updating ball details:', error);
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+}
+
+/**
+ * Update point information
+ */
+export const updatePoint = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+
+        const { tournamentId, teamId} = req.params;
+        
+        // matchResult : 'won', 'lost', 'tied', 'noResult'
+        const { matchResult, runsFor, oversFor, runsAgainst, oversAgainst } = req.body;
+
+        // Find tournament
+        const tournament = await Tournament.findById(tournamentId).session(session);
+        if (!tournament) {
+            return res.status(404).json({
+                status: false,
+                message: 'Tournament not found',
+                data: null
+            });
+        }
+
+        const team = await Team.findById(teamId).populate('createdBy').session(session);           
+        if (!team) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                status: false,
+                message: 'Team not found',
+                data: null
+            });
+        }
+
+        let point = await Point.findOne({ tournamentId, teamId });
+
+        if (!point) { 
+            point = new Point({ tournamentId, teamId });
+        }
+
+        // Update stats
+        point.matchesPlayed += 1;
+        point.runsFor += runsFor;
+        point.oversFor += oversFor;
+        point.runsAgainst += runsAgainst;
+        point.oversAgainst += oversAgainst;
+
+        switch (matchResult) {
+            case 'won':
+                point.won += 1;
+                point.points += 2;
+                break;
+            case 'lost':
+                point.lost += 1;
+                break;
+            case 'tied':
+                point.tied += 1;
+                point.points += 1;
+                break;
+            case 'noResult':
+                point.noResult += 1;
+                point.points += 1;
+                break;
+        }
+
+        point.netRunRate = calculateNetRunRate(point.runsFor, point.oversFor, point.runsAgainst, point.oversAgainst);
+        point.updatedAt = new Date();
+
+        await point.save();
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json({
+            status: true,
+            message: 'Point information updated successfully',
+            data: point
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error('Error updating point information:', error);
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+};
+
+// Helper to calculate NRR
+function calculateNetRunRate(runsFor, oversFor, runsAgainst, oversAgainst) {
+  if (oversFor === 0 || oversAgainst === 0) return 0.0;
+  const runRateFor = runsFor / oversFor;
+  const runRateAgainst = runsAgainst / oversAgainst;
+  return parseFloat((runRateFor - runRateAgainst).toFixed(3));
+};
+
+
+/**
+ * Add ball-by-ball scoring
+ */
+export const addSuperBall = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { matchId } = req.params;
+        const {
+            innings,
+            overNumber,
+            ballNumber,
+            runs,
+            isWicket,
+            wicketType,
+            playerOut,
+            commentary,
+            striker,
+            bowler,
+            ballType,          // regular, wide, noball, legbye, bye
+            extraRuns,         // Additional runs for extras
+            isBoundary,        // Whether the ball was a boundary (4 or 6)
+            isOver,            // Whether this is the last ball of the over
+            // New quick options
+            catchMissed,       // Boolean: Whether a catch was missed
+            fielder,           // ObjectId: Player who fielded the ball (for run saved/missed)
+            runSaved,          // Number: Runs saved by good fielding
+            runMissed,         // Number: Runs missed due to poor fielding
+            bonusRuns,         // Number: Additional bonus runs
+            isNegativeRuns,    // Boolean: Whether runs should be counted as negative (for corrections)
+            fieldingHighlight  // String: Description of fielding highlight
+        } = req.body;
+
+        // Validate input
+        if (!innings || !['firstInnings', 'secondInnings'].includes(innings)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                status: false,
+                message: 'Valid innings (firstInnings or secondInnings) is required',
+                data: null
+            });
+        }
+
+        if (overNumber === undefined || ballNumber === undefined || runs === undefined || !commentary) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                status: false,
+                message: 'Over number, ball number, runs, and commentary are required',
+                data: null
+            });
+        }
+
+        if (isWicket && !wicketType) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                status: false,
+                message: 'Wicket type is required when recording a wicket',
+                data: null
+            });
+        }
+
+        if (isWicket && !playerOut) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                status: false,
+                message: 'Player out ID is required when recording a wicket',
+                data: null
+            });
+        }
+
+        if (!striker || !bowler) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                status: false,
+                message: 'Striker and bowler information is required',
+                data: null
+            });
+        }
+
+        // Find match
+        const match = await Match.findById(matchId)
+            .populate('tournament', 'ballType')
+            .session(session);
+
+        if (!match) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                status: false,
+                message: 'Match not found',
+                data: null
+            });
+        }
+
+        // Calculate total runs (including extras and applying negative runs if needed)
+        let totalRuns = runs + (extraRuns || 0) + (bonusRuns || 0);
+        if (isNegativeRuns) {
+            totalRuns = -Math.abs(totalRuns);
+        }
+
+        // Ensure superOver object exists
+        if (!match.superOver) {
+            match.superOver = {};
+        }
+
+        // Ensure superOver innings object exists
+        if (!match.superOver[innings]) {
+            match.superOver[innings] = {
+                balls: [],
+                totalRuns: 0,
+                wickets: 0,
+                overs: 0,
+                isComplete: false
+            };
+        }
+
+        // Add ball to the innings
+        const ball = {
+            overNumber,
+            ballNumber,
+            runs: totalRuns,
+            isWicket,
+            wicketType,
+            playerOut,
+            commentary,
+            timestamp: new Date(),
+            striker,
+            bowler,
+            ballType: ballType || 'regular',
+            isBoundary: isBoundary || (runs === 4 || runs === 6),
+            isExtra: ballType && ballType !== 'regular',
+            // Add new fielding related information
+            catchMissed: catchMissed || false,
+            fielder: fielder || null,
+            runSaved: runSaved || 0,
+            runMissed: runMissed || 0,
+            bonusRuns: bonusRuns || 0,
+            isNegativeRuns: isNegativeRuns || false,
+            fieldingHighlight: fieldingHighlight || null,
+            isOver
+        };
+
+        match.superOver[innings].balls.push(ball);
+        
+        // Update innings statistics
+        match.superOver[innings].totalRuns += totalRuns;
+        if (isWicket) {
+            match.superOver[innings].wickets += 1;
+        }
+
+        // Calculate overs - handle extras that don't count as balls (wide, noball)
+        let legalDeliveries = match.superOver[innings].balls.filter(b =>
+            b.ballType === 'regular' || b.ballType === 'legbye' || b.ballType === 'bye').length;
+
+        const currentOvers = Math.floor(legalDeliveries / 6) + (legalDeliveries % 6) / 10;
+        match.superOver[innings].overs = currentOvers;
+
+        await match.save({ session });
+
+        // Populate all references before sending the response
+        const populatedMatch = await Match.findById(matchId)
+            .populate('tournament', 'tournamentId seriesName tournamentType matchType ballType pitchType oversPerInnings oversPerBowler')
+            .populate({
+                path: 'teamA',
+                select: 'teamName logo players',
+                populate: {
+                    path: 'players.player',
+                    select: '-password -groundAdded -clubs -isDeleted'
+                }
+            })
+            .populate({
+                path: 'teamB',
+                select: 'teamName logo players',
+                populate: {
+                    path: 'players.player',
+                    select: '-password -groundAdded -clubs -isDeleted'
+                }
+            })
+            .populate('venue', 'name city address1')
+            .populate('umpires', 'name email mobile')
+            .populate('firstInnings.currentStriker', 'name avatar mobile email')
+            .populate('firstInnings.currentNonStriker', 'name avatar mobile email')
+            .populate('firstInnings.currentBowler', 'name avatar mobile email')
+            .populate('firstInnings.currentKeeper', 'name avatar mobile email')
+            .populate('firstInnings.battingTeam', 'teamName logo')
+            .populate('firstInnings.bowlingTeam', 'teamName logo')
+            .populate('secondInnings.currentStriker', 'name avatar mobile email')
+            .populate('secondInnings.currentNonStriker', 'name avatar mobile email')
+            .populate('secondInnings.currentBowler', 'name avatar mobile email')
+            .populate('secondInnings.currentKeeper', 'name avatar mobile email')
+            .populate('secondInnings.battingTeam', 'teamName logo')
+            .populate('secondInnings.bowlingTeam', 'teamName logo')
+            .populate('tossWinner', 'teamName logo');
+
+        await session.commitTransaction();
+        session.endSession();
+
+        // Determine if this is a special event (boundary, wicket, or fielding highlight)
+        let specialEventType = null;
+        if (ball.isWicket) {
+            specialEventType = 'WICKET';
+        } else if (ball.isBoundary) {
+            specialEventType = runs === 6 ? 'SIX' : 'FOUR';
+        } else if (ballType && ballType !== 'regular') {
+            specialEventType = ballType.toUpperCase(); // 'WIDE', 'NOBALL', etc.
+        } else if (catchMissed) {
+            specialEventType = 'CATCH_MISSED';
+        } else if (runSaved > 0) {
+            specialEventType = 'RUN_SAVED';
+        } else if (runMissed > 0) {
+            specialEventType = 'RUN_MISSED';
+        } else if (bonusRuns > 0) {
+            specialEventType = 'BONUS_RUNS';
+        } else if (isNegativeRuns) {
+            specialEventType = 'NEGATIVE_RUNS';
+        }
+
+        // Get details of the players involved for better context
+        const strikerDetails = await User.findById(ball.striker, 'name avatar').lean();
+        const bowlerDetails = await User.findById(ball.bowler, 'name avatar').lean();
+        const playerOutDetails = ball.playerOut ? await User.findById(ball.playerOut, 'name avatar').lean() : null;
+        const fielderDetails = ball.fielder ? await User.findById(ball.fielder, 'name avatar').lean() : null;
+
+        // Calculate batting team's current score for display
+        const currentScore = {
+            runs: match.superOver[innings].totalRuns,
+            wickets: match.superOver[innings].wickets,
+            overs: match.superOver[innings].overs
+        };
+
+        // Build special event details based on event type
+        let specialEventDetails = null;
+        if (specialEventType === 'WICKET') {
+            specialEventDetails = {
+                wicketType,
+                batsmanOut: playerOutDetails || strikerDetails,
+                bowler: bowlerDetails
+            };
+        } else if (specialEventType === 'FOUR' || specialEventType === 'SIX') {
+            specialEventDetails = {
+                boundary: runs,
+                batsman: strikerDetails
+            };
+        } else if (specialEventType === 'CATCH_MISSED') {
+            specialEventDetails = {
+                batsman: strikerDetails,
+                fielder: fielderDetails,
+                description: fieldingHighlight || "Catch missed"
+            };
+        } else if (specialEventType === 'RUN_SAVED') {
+            specialEventDetails = {
+                batsman: strikerDetails,
+                fielder: fielderDetails,
+                runsSaved: runSaved,
+                description: fieldingHighlight || "Good fielding"
+            };
+        } else if (specialEventType === 'RUN_MISSED') {
+            specialEventDetails = {
+                batsman: strikerDetails,
+                fielder: fielderDetails,
+                runsMissed: runMissed,
+                description: fieldingHighlight || "Missed fielding opportunity"
+            };
+        } else if (specialEventType === 'BONUS_RUNS') {
+            specialEventDetails = {
+                batsman: strikerDetails,
+                bonusRuns: bonusRuns,
+                description: fieldingHighlight || "Bonus runs awarded"
+            };
+        } else if (specialEventType === 'NEGATIVE_RUNS') {
+            specialEventDetails = {
+                batsman: strikerDetails,
+                runs: totalRuns,
+                description: fieldingHighlight || "Runs deducted"
+            };
+        } else if (specialEventType === 'WIDE' || specialEventType === 'NOBALL') {
+            specialEventDetails = {
+                extraType: ballType,
+                runs: extraRuns || 0
+            };
+        }
+
+        // Check if an over has completed
+        const isOverComplete = ballType === 'regular' && ballNumber === 6;
+
+        // Broadcast the ball update to all users in the match room
+        broadcastMatchEvent(matchId, 'BALL_ADDED', {
+            matchId,
+            innings,
+            ball: {
+                ...ball,
+                striker: strikerDetails || ball.striker,
+                bowler: bowlerDetails || ball.bowler,
+                playerOut: playerOutDetails || ball.playerOut,
+                fielder: fielderDetails || ball.fielder
+            },
+            match: {
+                id: matchId,
+                [innings]: currentScore
+            },
+            specialEvent: specialEventType ? {
+                type: specialEventType,
+                details: specialEventDetails
+            } : null,
+            isOverComplete,
+            overNumber,
+            ballNumber,
+            commentary,
+            timestamp: new Date()
+        });
+
+        // Log with more context
+        let eventDesc = runs + " runs";
+        if (specialEventType) {
+            if (specialEventType === 'WICKET') {
+                eventDesc = `WICKET (${wicketType})`;
+            } else if (specialEventType === 'FOUR' || specialEventType === 'SIX') {
+                eventDesc = `${specialEventType} (${runs} runs by ${strikerDetails?.name || 'Unknown'})`;
+            } else if (specialEventType === 'CATCH_MISSED') {
+                eventDesc = `Catch missed by ${fielderDetails?.name || 'Unknown'}`;
+            } else if (specialEventType === 'RUN_SAVED') {
+                eventDesc = `${runSaved} runs saved by ${fielderDetails?.name || 'Unknown'}`;
+            } else if (specialEventType === 'RUN_MISSED') {
+                eventDesc = `${runMissed} runs missed by ${fielderDetails?.name || 'Unknown'}`;
+            } else if (specialEventType === 'BONUS_RUNS') {
+                eventDesc = `${bonusRuns} bonus runs`;
+            } else if (specialEventType === 'NEGATIVE_RUNS') {
+                eventDesc = `${Math.abs(totalRuns)} negative runs`;
+            } else {
+                eventDesc = `${specialEventType} (${runs} runs)`;
+            }
+        }
+        console.log(`Ball update [${eventDesc}] broadcast to match:${matchId}`);
+
+        // If over completed, send a separate over complete event
+        if (isOverComplete) {
+            // Calculate this over's runs and wickets
+            const thisOverBalls = match.superOver[innings].balls.filter(b =>
+                b.overNumber === overNumber
+            );
+            const overRuns = thisOverBalls.reduce((sum, b) => sum + b.runs, 0);
+            const overWickets = thisOverBalls.filter(b => b.isWicket).length;
+
+            broadcastMatchEvent(matchId, 'OVER_COMPLETE', {
+                matchId,
+                innings,
+                overNumber,
+                overSummary: {
+                    runs: overRuns,
+                    wickets: overWickets,
+                    boundaries: thisOverBalls.filter(b => b.isBoundary).length,
+                    extras: thisOverBalls.filter(b => b.isExtra).length
+                },
+                currentScore,
+                timestamp: new Date()
+            });
+            console.log(`Over complete [#${overNumber}, ${overRuns}/${overWickets}] broadcast to match:${matchId}`);
+        }
+
+        // If innings is complete, send an innings complete event
+        if (match.superOver[innings].isComplete) {
+            broadcastMatchEvent(matchId, 'INNINGS_COMPLETE', {
+                matchId,
+                innings,
+                inningsSummary: {
+                    totalRuns: match.superOver[innings].totalRuns,
+                    wickets: match.superOver[innings].wickets,
+                    overs: match.superOver[innings].overs,
+                    battingTeam: match.superOver[innings].battingTeam,
+                    bowlingTeam: match.superOver[innings].bowlingTeam
+                },
+                timestamp: new Date()
+            });
+            console.log(`Innings complete [${innings}] broadcast to match:${matchId}`);
+        }
+
+        // If this is the final over, broadcast a special notification
+        if (match['superOver'][innings].isFinalOver) {
+            const tournament = await Tournament.findById(match.tournament).lean();
+            if (tournament) {
+                const maxOvers = tournament.oversPerInnings;
+                broadcastMatchEvent(matchId, 'FINAL_OVER', {
+                    matchId,
+                    innings,
+                    currentScore: {
+                        runs: match.superOver[innings].totalRuns,
+                        wickets: match.superOver[innings].wickets,
+                        overs: match.superOver[innings].overs
+                    },
+                    maxOvers,
+                    ballsRemaining: 6 - (Math.round((match.superOver[innings].overs % 1) * 10)),
+                    message: `Final over of the ${innings === 'firstInnings' ? 'first' : 'second'} innings!`
+                }, `Final over notification broadcast to match:${matchId}`);
+            }
+        }
+
+        return res.status(200).json({
+            status: true,
+            message: 'Super Over Ball added successfully',
+            data: populatedMatch
+        });
+    } catch (error) {
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        session.endSession();
+
+        console.error('Error adding ball:', error);
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+};
+
+
+/**
+ * Add  Super Over information
+ */
+export const addSuperOverTeam = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { matchId } = req.params;
+        const { battingTeam, bowlingTeam } = req.body;
+    
+        // Validate input
+        if (!battingTeam || !bowlingTeam) {
+            return res.status(400).json({
+                status: false,
+                message: 'Batting Team and Bowling Team are required',
+                data: null
+            });
+        }
+
+        // Find match
+        const match = await Match.findById(matchId)
+            .populate('teamA', 'teamName logo')
+            .populate('teamB', 'teamName logo')
+            .session(session);
+        if (!match) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                status: false,
+                message: 'Match not found',
+                data: null
+            });
+        }
+
+        // Initialize innings objects if they don't exist
+        if (!match.superOver.firstInnings) {
+            match.superOver.firstInnings = {
+                totalRuns: 0,
+                wickets: 0,
+                overs: 0,
+                balls: [],
+                isComplete: false
+            };
+        }
+
+        if (!match.superOver.secondInnings) {
+            match.superOver.secondInnings = {
+                totalRuns: 0,
+                wickets: 0,
+                overs: 0,
+                balls: [],
+                isComplete: false
+            };
+        }
+
+        // Set batting and bowling teams based on toss
+        match.firstInnings.battingTeam = battingTeam;
+        match.firstInnings.bowlingTeam = bowlingTeam;
+        match.secondInnings.battingTeam = bowlingTeam;
+        match.secondInnings.bowlingTeam = battingTeam;
+
+        await match.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json({
+            status: true,
+            message: 'Super information updated successfully',
+            data: match
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error('Error updating toss information:', error);
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+};
+
+/**
+ * Update current super over players in the innings
+ */
+export const updateSuperOverTeam = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { matchId } = req.params;
+        const {
+            innings,
+            currentStriker,
+            currentNonStriker,
+            currentBowler,
+            currentKeeper,
+        } = req.body;
+
+        // Validate input
+        if (!innings || !['firstInnings', 'secondInnings'].includes(innings)) {
+            return res.status(400).json({
+                status: false,
+                message: 'Valid innings (firstInnings or secondInnings) is required',
+                data: null
+            });
+        }
+
+        if (!currentStriker || !currentNonStriker || !currentBowler || !currentKeeper) {
+            return res.status(400).json({
+                status: false,
+                message: 'All current players are required',
+                data: null
+            });
+        }
+
+        // Find match
+        const match = await Match.findById(matchId)
+            .session(session);
+
+        if (!match) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                status: false,
+                message: 'Match not found',
+                data: null
+            });
+        }
+
+        // Update current players for the specified innings
+        match.superOver[innings].currentStriker = currentStriker;
+        match.superOver[innings].currentNonStriker = currentNonStriker;
+        match.superOver[innings].currentBowler = currentBowler;
+        match.superOver[innings].currentKeeper = currentKeeper;
+
+        await match.save({ session });
+
+        // Fetch player information for socket event
+        const populatedMatch = await Match.findById(matchId)
+            .populate('firstInnings.currentStriker', 'name avatar')
+            .populate('firstInnings.currentNonStriker', 'name avatar')
+            .populate('firstInnings.currentBowler', 'name avatar')
+            .populate('firstInnings.currentKeeper', 'name avatar')
+            .populate('secondInnings.currentStriker', 'name avatar')
+            .populate('secondInnings.currentNonStriker', 'name avatar')
+            .populate('secondInnings.currentBowler', 'name avatar')
+            .populate('secondInnings.currentKeeper', 'name avatar')
+            .populate('firstInnings.currentStriker', 'name avatar')
+            .populate('superOver.firstInnings.currentNonStriker', 'name avatar')
+            .populate('superOver.firstInnings.currentBowler', 'name avatar')
+            .populate('superOver.firstInnings.currentKeeper', 'name avatar')
+            .populate('superOver.secondInnings.currentStriker', 'name avatar')
+            .populate('superOver.secondInnings.currentNonStriker', 'name avatar')
+            .populate('superOver.secondInnings.currentBowler', 'name avatar')
+            .populate('superOver.secondInnings.currentKeeper', 'name avatar')
+            .session(session);
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json({
+            status: true,
+            message: 'Current players updated successfully',
+            data: match,
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error('Error updating current players:', error);
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+};
+
+
+/**
+ * Undo the last ball added to a match
+ * @access Private - Only umpires can undo balls
+ */
+export const undoSuperOverBall = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { matchId } = req.params;
+        const { innings } = req.body;
+
+        // Validate input
+        if (!innings || !['firstInnings', 'secondInnings'].includes(innings)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                status: false,
+                message: 'Valid innings (firstInnings or secondInnings) is required',
+                data: null
+            });
+        }
+
+        // Find match
+        const match = await Match.findById(matchId)
+            .populate('tournament', 'ballType')
+            .session(session);
+
+        if (!match) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                status: false,
+                message: 'Match not found',
+                data: null
+            });
+        }
+
+        // Check if there are balls to undo
+        if (!match.superOver[innings].balls || match.superOver[innings].balls.length === 0) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                status: false,
+                message: 'No balls to undo',
+                data: null
+            });
+        }
+
+        // Get the last ball
+        const lastBall = match.superOver[innings].balls.pop();
+
+        // Update innings statistics
+        match.superOver[innings].totalRuns -= lastBall.runs;
+        if (lastBall.isWicket) {
+            match.superOver[innings].wickets -= 1;
+        }
+
+        // Recalculate overs
+        let legalDeliveries = match.superOver[innings].balls.filter(b =>
+            b.ballType === 'regular' || b.ballType === 'legbye' || b.ballType === 'bye').length;
+
+        const currentOvers = Math.floor(legalDeliveries / 6) + (legalDeliveries % 6) / 10;
+        match.superOver[innings].overs = currentOvers;
+
+        await match.save({ session });
+
+        // Populate all references before sending the response
+        const populatedMatch = await Match.findById(matchId)
+            .populate('tournament', 'tournamentId seriesName tournamentType matchType ballType pitchType oversPerInnings oversPerBowler')
+            .populate({
+                path: 'teamA',
+                select: 'teamName logo players',
+                populate: {
+                    path: 'players.player',
+                    select: '-password -groundAdded -clubs -isDeleted'
+                }
+            })
+            .populate({
+                path: 'teamB',
+                select: 'teamName logo players',
+                populate: {
+                    path: 'players.player',
+                    select: '-password -groundAdded -clubs -isDeleted'
+                }
+            })
+            .populate('venue', 'name city address1')
+            .populate('umpires', 'name email mobile')
+            .populate('firstInnings.currentStriker', 'name avatar mobile email')
+            .populate('firstInnings.currentNonStriker', 'name avatar mobile email')
+            .populate('firstInnings.currentBowler', 'name avatar mobile email')
+            .populate('firstInnings.currentKeeper', 'name avatar mobile email')
+            .populate('firstInnings.battingTeam', 'teamName logo')
+            .populate('firstInnings.bowlingTeam', 'teamName logo')
+            .populate('secondInnings.currentStriker', 'name avatar mobile email')
+            .populate('secondInnings.currentNonStriker', 'name avatar mobile email')
+            .populate('secondInnings.currentBowler', 'name avatar mobile email')
+            .populate('secondInnings.currentKeeper', 'name avatar mobile email')
+            .populate('secondInnings.battingTeam', 'teamName logo')
+            .populate('secondInnings.bowlingTeam', 'teamName logo')
+            .populate('tossWinner', 'teamName logo');
+
+        await session.commitTransaction();
+        session.endSession();
+
+        // Determine which type of ball was undone
+        let specialEventType = null;
+        if (lastBall.isWicket) {
+            specialEventType = 'WICKET';
+        } else if (lastBall.isBoundary) {
+            specialEventType = lastBall.runs === 6 ? 'SIX' : 'FOUR';
+        } else if (lastBall.ballType && lastBall.ballType !== 'regular') {
+            specialEventType = lastBall.ballType.toUpperCase(); // 'WIDE', 'NOBALL', etc.
+        }
+
+        // Get details of the players involved for better context
+        const strikerDetails = await User.findById(lastBall.striker, 'name avatar').lean();
+        const bowlerDetails = await User.findById(lastBall.bowler, 'name avatar').lean();
+        const playerOutDetails = lastBall.playerOut ? await User.findById(lastBall.playerOut, 'name avatar').lean() : null;
+
+        // Check if the undo affected an over completion
+        const overComplete = lastBall.ballNumber === 6 && lastBall.ballType === 'regular';
+
+        // Calculate batting team's current score after undo
+        const currentScore = {
+            runs: match.superOver[innings].totalRuns,
+            wickets: match.superOver[innings].wickets,
+            overs: match.superOver[innings].overs
+        };
+
+        // Create a clean version of the removed ball without circular references
+        const cleanRemovedBall = {
+            overNumber: lastBall.overNumber,
+            ballNumber: lastBall.ballNumber,
+            runs: lastBall.runs,
+            isWicket: lastBall.isWicket,
+            wicketType: lastBall.wicketType,
+            ballType: lastBall.ballType,
+            isBoundary: lastBall.isBoundary,
+            timestamp: lastBall.timestamp,
+            striker: strikerDetails ? {
+                _id: strikerDetails._id,
+                name: strikerDetails.name,
+                avatar: strikerDetails.avatar
+            } : null,
+            bowler: bowlerDetails ? {
+                _id: bowlerDetails._id,
+                name: bowlerDetails.name,
+                avatar: bowlerDetails.avatar
+            } : null,
+            playerOut: playerOutDetails ? {
+                _id: playerOutDetails._id,
+                name: playerOutDetails.name,
+                avatar: playerOutDetails.avatar
+            } : null
+        };
+
+        // Broadcast the undo ball update to all users in the match room
+        broadcastMatchEvent(matchId, 'BALL_UNDONE', {
+            matchId,
+            innings,
+            removedBall: cleanRemovedBall,
+            match: {
+                id: matchId,
+                [innings]: currentScore
+            },
+            specialEvent: specialEventType ? {
+                type: specialEventType,
+                undone: true,
+                details: specialEventType === 'WICKET' ? {
+                    wicketType: lastBall.wicketType,
+                    batsmanRestored: playerOutDetails ? {
+                        _id: playerOutDetails._id,
+                        name: playerOutDetails.name,
+                        avatar: playerOutDetails.avatar
+                    } : null,
+                    bowler: bowlerDetails ? {
+                        _id: bowlerDetails._id,
+                        name: bowlerDetails.name,
+                        avatar: bowlerDetails.avatar
+                    } : null
+                } : specialEventType === 'FOUR' || specialEventType === 'SIX' ? {
+                    boundary: lastBall.runs,
+                    batsman: strikerDetails ? {
+                        _id: strikerDetails._id,
+                        name: strikerDetails.name,
+                        avatar: strikerDetails.avatar
+                    } : null
+                } : {
+                    extraType: lastBall.ballType,
+                    runs: lastBall.runs
+                }
+            } : null,
+            overAffected: overComplete ? {
+                overNumber: lastBall.overNumber,
+                action: 'UNDO_COMPLETE'
+            } : null,
+            timestamp: new Date()
+        });
+
+        // Log with more context
+        const eventDesc = specialEventType ?
+            `${specialEventType} (${lastBall.runs} runs by ${strikerDetails?.name || 'Unknown'})` :
+            `Regular ball (${lastBall.runs} runs)`;
+        console.log(`Ball undo [${eventDesc}] broadcast to match:${matchId}`);
+
+        // If innings status changed from complete to incomplete, notify
+        if (lastBall.isWicket && match[innings].wickets === 9) {
+            broadcastMatchEvent(matchId, 'INNINGS_STATUS_CHANGED', {
+                matchId,
+                innings,
+                previousStatus: 'COMPLETE',
+                currentStatus: 'IN_PROGRESS',
+                currentScore,
+                timestamp: new Date()
+            });
+            console.log(`Innings status change [COMPLETE → IN_PROGRESS] broadcast to match:${matchId}`);
+        }
+
+        return res.status(200).json({
+            status: true,
+            message: 'Ball undone successfully',
+            data: populatedMatch
+        });
+    } catch (error) {
+        // Check if session is still active before aborting
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        session.endSession();
+
+        console.error('Error undoing ball:', error);
+        return res.status(500).json({
+            status: false,
+            message: error.message,
+            data: null
+        });
+    }
+};
+
+export const updateSuperOverBall = async (req, res) => {
+    try {
+        const { matchId, ballId } = req.params;
+        const { innings, catchMissed, fielder, runSaved, runMissed, fieldingHighlight, negativeRuns, reason, bonusRuns } = req.body;
+
+        console.log("Update Ball API Call : ", req.body);
+
+        // Validate innings parameter
+        if (!innings || !['firstInnings', 'secondInnings'].includes(innings)) {
+            return res.status(400).json({
+                status: false,
+                message: 'Valid innings (firstInnings or secondInnings) is required',
+                data: null
+            });
+        }
+
+        // Get the match details
+        const match = await Match.findById(matchId);
+        if (!match) {
+            return res.status(404).json({
+                status: false,
+                message: 'Match not found',
+                data: null
+            });
+        }
+
+        // Initialize historyLogs array if it doesn't exist
+        if (!match.superOver[innings]?.historyLogs) {
+            match.superOver[innings]['historyLogs'] = [];
+        }
+
+        // Update the single ball details
+        match.superOver[innings]?.balls?.forEach((element) => {
+            if (element?._id == ballId) {
+                element['catchMissed'] = catchMissed || element['catchMissed'] || null;
+                element['fielder'] = fielder || element['fielder'] || null;
+                element['runSaved'] = runSaved || element['runSaved'] || null;
+                element['runMissed'] = runMissed || element['runMissed'] || null;
+                element['fieldingHighlight'] = fieldingHighlight || element['fieldingHighlight'] || null;
+            }
+        });
+
+        // Manage array for the manage negative run and bonus run logs
+        const historyLogs = [];
+
+        // Minus the negativeRuns from the total runs and create the log
+        if (negativeRuns && Number(negativeRuns) > 0) {
+            match.superOver[innings]['totalRuns'] = Number(match.superOver[innings]['totalRuns'] || 0) - Number(negativeRuns);
+            historyLogs.push({
+                "reason": reason || `Minus run ${negativeRuns}`,
+                "isNegativeRun": true,
+                "isBonusRun": false,
+                "timestamp": new Date(),
+                'runs': negativeRuns
+            });
+        }
+
+        // Add the bonus runs on the totalRuns and create the log
+        if (bonusRuns && Number(bonusRuns) > 0) {
+            match.superOver[innings]['totalRuns'] = Number(match.superOver[innings]['totalRuns'] || 0) + Number(bonusRuns);
+            historyLogs.push({
+                "reason": reason || `Add bonus run ${bonusRuns}`,
+                "isNegativeRun": false,
+                "isBonusRun": true,
+                "timestamp": new Date(),
+                'runs': bonusRuns
+            });
+        }
+
+        // Update history logs
+        if (historyLogs.length > 0) {
+            match.superOver[innings].historyLogs = [...match.superOver[innings].historyLogs, ...historyLogs];
         }   
 
         await match.save();

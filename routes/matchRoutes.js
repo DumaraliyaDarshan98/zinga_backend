@@ -9,7 +9,13 @@ import {
   getMyUmpireMatches,
   undoBall,
   getBattingStatus,
-  updateBall
+  updateBall,
+  updatePoint,
+  addSuperBall,
+  addSuperOverTeam,
+  updateSuperOverTeam,
+  undoSuperOverBall,
+  updateSuperOverBall
 } from "../controllers/matchController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 
@@ -44,5 +50,18 @@ router.get("/:matchId/batting-status", authMiddleware, getBattingStatus);
 
 // API to be used for the update ball details and update the innings total runs based on the negative run and bonus runs
 router.patch("/:matchId/update-ball/:ballId", authMiddleware, updateBall);
+
+router.patch("/:tournamentId/update-point/:teamId", authMiddleware, updatePoint);
+
+// Add ball-by-ball scoring
+router.post("/:matchId/super-ball", authMiddleware, addSuperBall);
+
+router.post("/:matchId/add-super-over-team", authMiddleware, addSuperOverTeam);
+
+router.patch("/:matchId/update-super-over-team", authMiddleware, updateSuperOverTeam);
+
+router.patch("/:matchId/undo-super-over-ball", authMiddleware, undoSuperOverBall);
+
+router.patch("/:matchId/update-super-over-ball", authMiddleware, updateSuperOverBall);
 
 export default router;

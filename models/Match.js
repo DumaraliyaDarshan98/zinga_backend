@@ -371,6 +371,16 @@ const matchSchema = new mongoose.Schema({
     },
     groupName: {
         type: String
+    },
+    superOver:{
+        firstInnings: {
+            type: inningsSchema,
+            required: false
+        },
+        secondInnings: {
+            type: inningsSchema,
+            required: false
+        },
     }
 }, {
     timestamps: true,
