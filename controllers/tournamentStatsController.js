@@ -109,9 +109,10 @@ export const getTournamentStats = async (req, res) => {
         }
 
         // Get all completed matches
-        const matches = await Match.find({
-            tournament: tournament._id
-        }).populate('teamA teamB');
+        const matches = await Match.find({ tournament: tournament._id })
+        .populate('teamA teamB')
+        .populate('firstInnings.balls.striker', 'name email mobile avatar')
+        .populate('firstInnings.balls.bowler', 'name email mobile avatar');
 
         // Initialize player stats
         const playerStats = {};
