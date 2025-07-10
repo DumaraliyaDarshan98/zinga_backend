@@ -1463,11 +1463,11 @@ export const joinTournament = async (req, res) => {
             tournament.status = 'live';
         }
         await tournament.save({ session });
-        console.log("ttttttttttttt")
+        console.log("ttttttttttttt", tournamentTeam)
         
         // Commit the transaction
-        // await session.commitTransaction();
-        // session.endSession();
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json({
             status: true,
@@ -1475,7 +1475,7 @@ export const joinTournament = async (req, res) => {
             data: {
                 tournament: tournament,
                 groundRegistration: groundRegistration,
-                tournamentTeam: tournamentTeam,
+                tournamentTeam: tournamentTeamIds,
                 paymentStatus: paymentStatus
             }
         });
