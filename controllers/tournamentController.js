@@ -1962,6 +1962,12 @@ export const getTournamentById = async (req, res) => {
             });
         }
 
+        // Fetch bookings for all tournaments
+        const booking = await Booking.find({
+            tournamentId: id,
+            userId: new mongoose.Types.ObjectId(userId)
+        });
+        
         // Filter venue time slots to only include those with isTournament=true
         if (tournament.venues && tournament.venues.length > 0) {
             tournament.venues.forEach(venue => {
@@ -2059,7 +2065,8 @@ export const getTournamentById = async (req, res) => {
             rules: rules?.rules || [],
             guidelines: guidelines?.guidelines || [],
             teamSpecificStatus,
-            userTeamJoined
+            userTeamJoined,
+            booking : booking || []
         };
 
         return res.status(200).json({
