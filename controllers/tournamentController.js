@@ -1296,8 +1296,8 @@ export const joinTournament = async (req, res) => {
         const startDate = new Date(from);
         const endDate = new Date(to);
 
-        console.log("666666666666666666") 
         if (startDate > endDate) {
+            console.log("666666666666666666") 
             await session.abortTransaction();
             session.endSession();
             return res.status(400).json({
@@ -1306,8 +1306,6 @@ export const joinTournament = async (req, res) => {
                 data: null
             });
         }
-
-            console.log("555555555555")
 
         // Fetch the ground to verify slots
         const ground = await Ground.findById(groundId).session(session);
@@ -1481,6 +1479,7 @@ export const joinTournament = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error('Error joining tournament dddddddddddd:', error);
         await session.abortTransaction();
         session.endSession();
 
