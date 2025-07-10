@@ -1315,7 +1315,7 @@ export const joinTournament = async (req, res) => {
 
         const conflicts = [];
         let bookingId = '';
-        let tournamentTeamId = [];
+        let tournamentTeamIds = [];
 
         // Iterate through each day in the range
         for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
