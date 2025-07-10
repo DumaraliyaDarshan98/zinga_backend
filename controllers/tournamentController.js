@@ -1464,9 +1464,10 @@ export const joinTournament = async (req, res) => {
         }
         await tournament.save({ session });
         console.log("ttttttttttttt")
+        
         // Commit the transaction
-        await session.commitTransaction();
-        session.endSession();
+        // await session.commitTransaction();
+        // session.endSession();
 
         return res.status(200).json({
             status: true,
