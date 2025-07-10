@@ -1195,6 +1195,7 @@ export const joinTournament = async (req, res) => {
 
         // Check if tournament status is upcoming globally
         if (tournament.status !== 'upcoming' && tournament.status !== 'live') {
+            console.log("11 11 11 11 11 11 11 ") 
             await session.abortTransaction();
             session.endSession();
             return res.status(400).json({
@@ -1209,6 +1210,7 @@ export const joinTournament = async (req, res) => {
 
         if (paymentMethod === "pass") {
             if (!passId) {
+                console.log("10101010 10") 
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(400).json({
@@ -1226,6 +1228,7 @@ export const joinTournament = async (req, res) => {
             }).session(session);
 
             if (!pass) {
+                console.log("9999999999999999999") 
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(404).json({
@@ -1255,6 +1258,7 @@ export const joinTournament = async (req, res) => {
             await payment.save({ session });
         } else if (paymentMethod === "direct") {
             if (!transactionId) {
+                console.log("8888888888888") 
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(400).json({
@@ -1278,6 +1282,7 @@ export const joinTournament = async (req, res) => {
 
             await payment.save({ session });
         } else {
+            console.log("777777777777") 
             await session.abortTransaction();
             session.endSession();
             return res.status(400).json({
@@ -1291,6 +1296,7 @@ export const joinTournament = async (req, res) => {
         const startDate = new Date(from);
         const endDate = new Date(to);
 
+        console.log("666666666666666666") 
         if (startDate > endDate) {
             await session.abortTransaction();
             session.endSession();
@@ -1301,9 +1307,12 @@ export const joinTournament = async (req, res) => {
             });
         }
 
+            console.log("555555555555")
+
         // Fetch the ground to verify slots
         const ground = await Ground.findById(groundId).session(session);
         if (!ground) {
+            console.log("4444444444444444")
             await session.abortTransaction();
             session.endSession();
             return res.status(404).json({
@@ -1419,6 +1428,7 @@ export const joinTournament = async (req, res) => {
         if (conflicts.length > 0) {
             await session.abortTransaction();
             session.endSession();
+            console.log("222222222222222")
             return res.status(409).json({
                 status: false,
                 data: conflicts,
@@ -1455,7 +1465,7 @@ export const joinTournament = async (req, res) => {
             tournament.status = 'live';
         }
         await tournament.save({ session });
-
+        console.log("ttttttttttttt")
         // Commit the transaction
         await session.commitTransaction();
         session.endSession();
