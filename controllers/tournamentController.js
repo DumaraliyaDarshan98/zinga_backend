@@ -1463,7 +1463,6 @@ export const joinTournament = async (req, res) => {
             tournament.status = 'live';
         }
         await tournament.save({ session });
-        console.log("ttttttttttttt", tournamentTeam)
         
         // Commit the transaction
         await session.commitTransaction();
