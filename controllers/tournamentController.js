@@ -1287,19 +1287,6 @@ export const joinTournament = async (req, res) => {
             });
         }
 
-        // Create tournament team entry
-        const tournamentTeam = new TournamentTeam({
-            tournament: tournament._id,
-            team: teamId,
-            players: team.players.map(p => ({
-                player: p.player,
-                isPlaying: true
-            })),
-            createdBy: req.user._id
-        });
-
-        await tournamentTeam.save({ session });
-
         // Process the ground booking
         const startDate = new Date(from);
         const endDate = new Date(to);
@@ -1328,6 +1315,7 @@ export const joinTournament = async (req, res) => {
 
         const conflicts = [];
         let bookingId = '';
+        let tournamentTeamId = [];
 
         // Iterate through each day in the range
         for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
@@ -1410,12 +1398,24 @@ export const joinTournament = async (req, res) => {
                     await newBooking.save({ session });
                     bookingId = newBooking._id;
                 }
+                        
+                // Create tournament team entry
+                const tournamentTeam = new TournamentTeam({
+                    tournament: tournament._id,
+                    team: teamId,
+                    players: team.players.map(p => ({
+                        player: p.player,
+                        isPlaying: true
+                    })),
+                    createdBy: req.user._id,
+                    booking : bookingId
+                });
+
+                const savedTeam = await tournamentTeam.save({ session });
+                tournamentTeamIds.push(savedTeam._id); // Store the _id
             }
         }
         
-        tournamentTeam.booking = bookingId;
-        await tournamentTeam.save({ session });
-
         if (conflicts.length > 0) {
             await session.abortTransaction();
             session.endSession();
@@ -1438,7 +1438,7 @@ export const joinTournament = async (req, res) => {
         // Add team to the tournament's registered teams
         tournament.registeredTeams.push({
             team: teamId,
-            tournamentTeam: tournamentTeam._id,
+            tournamentTeam: tournamentTeamIds,
             paymentStatus: paymentStatus
         });
 
