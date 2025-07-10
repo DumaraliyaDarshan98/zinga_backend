@@ -1920,6 +1920,7 @@ export const getAllTournaments = async (req, res) => {
 export const getTournamentById = async (req, res) => {
     try {
         const { id } = req.params;
+        const userId = req.user._id;
 
         // Find tournament by ID or tournamentId
         let query = {
